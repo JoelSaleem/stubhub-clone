@@ -1,0 +1,52 @@
+import mongoose from "mongoose";
+import { Message } from "node-nats-streaming";
+import { OrderCancelledEvent } from "@jstickets-shclone/common";
+import { Ticket } from "../../../models/ticket";
+import { natsWrapper } from "../../../nats-wrapper";
+import { OrderCancelledListener } from "../order-cancelled-listener";
+
+const setup = async () => {
+  const listener = new OrderCancelledListener(natsWrapper.client);
+
+  const orderId = mongoose.Types.ObjectId().toHexString();
+  const ticket = Ticket.build({
+    title: "adf",
+    price: 10,
+    userId: "123",
+  });
+  ticket.set({ orderId });
+  await ticket.save();
+
+  const data: OrderCancelledEvent["data"] = {
+    id: orderId,
+    ticket: {
+      id: ticket.id,
+    },
+    version: 0,
+  };
+
+  // @ts-ignore
+  const msg: Message = {
+    ack: jest.fn(),
+  };
+
+  return {
+    listener,
+    ticket,
+    msg,
+    data,
+    orderId,
+  };
+};
+
+it("updates the ticket, publishes an event and ackst the message", async () => {
+  const { data, msg, listener, orderId, ticket } = await setup();
+
+  await listener.onMessage(data, msg);
+
+  const updatedTicket = await Ticket.findById(ticket.id);
+  
+  expect(updatedTicket!.orderId).not.toBeDefined();
+  expect(msg.ack).toHaveBeenCalled();
+  expect(natsWrapper.client.publish).toHaveBeenCalled();
+});
